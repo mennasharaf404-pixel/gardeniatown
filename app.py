@@ -1,977 +1,366 @@
+
 import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.express as px
 from pathlib import Path
 
-
-# =========================================================
-# PAGE CONFIG
-# =========================================================
-
 st.set_page_config(
-    page_title="Gardenia Town | Inventory Dashboard",
+    page_title="Gardenia Town | ALBA vs ORCHID",
     page_icon="🏢",
     layout="wide",
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="expanded",
 )
 
+DATA_FILE = Path(__file__).parent / "data" / "All Inventory Project(1).xlsx"
+SHEET = "Gardenia Town"
 
-# =========================================================
-# STYLE
-# =========================================================
-
+# -----------------------------
+# Style
+# -----------------------------
 st.markdown("""
 <style>
-
-    .main {
-        background-color: #f7f8fa;
-    }
-
-    .block-container {
-        padding-top: 1.5rem;
-        padding-bottom: 2rem;
-    }
-
-    h1, h2, h3 {
-        color: #17324d;
-    }
-
-    .dashboard-title {
-        font-size: 32px;
-        font-weight: 700;
-        color: #17324d;
-        margin-bottom: 0;
-    }
-
-    .dashboard-subtitle {
-        color: #718096;
-        margin-top: 5px;
-        margin-bottom: 25px;
-    }
-
-    .kpi {
-        background: white;
-        padding: 20px;
-        border-radius: 12px;
-        border: 1px solid #e6e9ed;
-        box-shadow: 0 2px 8px rgba(0,0,0,0.04);
-    }
-
-    .kpi-title {
-        font-size: 13px;
-        color: #718096;
-        margin-bottom: 8px;
-    }
-
-    .kpi-value {
-        font-size: 28px;
-        font-weight: 700;
-        color: #17324d;
-    }
-
-    .section-title {
-        font-size: 20px;
-        font-weight: 700;
-        color: #17324d;
-        margin-top: 25px;
-        margin-bottom: 10px;
-    }
-
-    div[data-testid="stDataFrame"] {
-        border-radius: 10px;
-    }
-
+.block-container {padding-top:1.2rem; padding-bottom:2rem;}
+.main-title {font-size:2.2rem;font-weight:800;letter-spacing:.5px;}
+.sub-title {color:#667085;margin-bottom:1rem;}
+.section-title {font-size:1.15rem;font-weight:750;margin:1.1rem 0 .65rem;}
+div[data-testid="stMetric"] {
+    background:#fff;border:1px solid #e4e7ec;border-radius:14px;
+    padding:14px 16px;box-shadow:0 2px 8px rgba(16,24,40,.05);
+}
+.filter-note {
+    background:#f8fafc;border:1px solid #eaecf0;border-radius:10px;
+    padding:9px 12px;color:#475467;font-size:.9rem;
+}
 </style>
 """, unsafe_allow_html=True)
 
-
-# =========================================================
-# FIND EXCEL FILE
-# =========================================================
-
-BASE_DIR = Path(__file__).resolve().parent
-
-possible_paths = [
-    BASE_DIR / "data" / "All Inventory Project(1).xlsx",
-    BASE_DIR / "All Inventory Project(1).xlsx",
-    BASE_DIR / "data" / "All_Inventory_Project.xlsx",
-    BASE_DIR / "All_Inventory_Project.xlsx",
-]
-
-EXCEL_PATH = None
-
-for path in possible_paths:
-    if path.exists():
-        EXCEL_PATH = path
-        break
-
-
-# =========================================================
-# LOAD DATA
-# =========================================================
-
+# -----------------------------
+# Load data
+# -----------------------------
 @st.cache_data
-def load_data(file_path):
+def load_data(path):
+    df = pd.read_excel(path, sheet_name=SHEET, header=4)
+    df = df.dropna(how="all").copy()
+    df.columns = [str(c).strip() for c in df.columns]
 
-    df = pd.read_excel(
-        file_path,
-        sheet_name="Gardenia Town",
-        header=4
-    )
+    text_cols = [
+        "Phase", "Unit Code", "Unit Type", "Building", "Floor",
+        "Apartment NO.", "Type", "STATUS", "Rooms Num", "Name of client"
+    ]
+    for col in text_cols:
+        if col in df.columns:
+            df[col] = df[col].astype("string").str.strip()
 
-    # Remove completely empty columns
-    df = df.dropna(axis=1, how="all")
+    if "Phase" in df.columns:
+        df["Phase"] = df["Phase"].str.upper()
+    if "STATUS" in df.columns:
+        df["STATUS"] = df["STATUS"].str.strip()
 
-    # Clean column names
-    df.columns = (
-        df.columns
-        .astype(str)
-        .str.strip()
-        .str.replace("\n", " ", regex=False)
-    )
+    # Numeric columns used by filters / analysis
+    for col in ["In/Area", "NEW M.PRICE", "M.PRICE", "Total Unit", "Rooms Num", "Floor"]:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
 
     return df
 
-
-if EXCEL_PATH is None:
-
-    st.error(
-        "Excel file was not found. "
-        "Make sure 'All Inventory Project(1).xlsx' is inside the "
-        "data folder or the same folder as app.py."
-    )
-
-    st.stop()
-
-
 try:
-
-    df = load_data(EXCEL_PATH)
-
+    df = load_data(DATA_FILE)
 except Exception as e:
-
     st.error(f"Could not load the Excel file: {e}")
     st.stop()
 
-
-# =========================================================
-# CHECK REQUIRED COLUMNS
-# =========================================================
-
-required_columns = [
-    "Phase",
-    "Unit Code",
-    "Unit Type",
-    "Building",
-    "Floor",
-    "Type",
-    "In/Area",
-    "STATUS"
-]
-
-missing_columns = [
-    col for col in required_columns
-    if col not in df.columns
-]
-
-if missing_columns:
-
-    st.error(
-        "The following required columns are missing:\n\n"
-        + ", ".join(missing_columns)
-    )
-
-    st.write("Columns detected in the Excel file:")
-    st.write(list(df.columns))
-
+required = ["Phase", "Unit Code", "Unit Type", "Building", "Floor", "STATUS"]
+missing = [c for c in required if c not in df.columns]
+if missing:
+    st.error("Missing columns in Gardenia Town: " + ", ".join(missing))
     st.stop()
 
-
-# =========================================================
-# CLEAN DATA
-# =========================================================
-
-df["Phase"] = df["Phase"].astype(str).str.strip()
-df["STATUS"] = df["STATUS"].astype(str).str.strip()
-df["Type"] = df["Type"].astype(str).str.strip()
-df["Unit Type"] = df["Unit Type"].astype(str).str.strip()
-df["Building"] = df["Building"].astype(str).str.strip()
-
-# Numeric fields
-df["Floor"] = pd.to_numeric(df["Floor"], errors="coerce")
-df["In/Area"] = pd.to_numeric(df["In/Area"], errors="coerce")
-
-# Remove invalid phase rows
-df = df[
-    df["Phase"].isin(["ALBA", "ORCHID"])
-].copy()
-
-
-# =========================================================
-# HEADER
-# =========================================================
-
-st.markdown(
-    '<div class="dashboard-title">Gardenia Town Inventory Dashboard</div>',
-    unsafe_allow_html=True
-)
-
-st.markdown(
-    '<div class="dashboard-subtitle">'
-    'ALBA vs ORCHID — Sales & Inventory Overview'
-    '</div>',
-    unsafe_allow_html=True
-)
-
-
-# =========================================================
-# SIDEBAR FILTERS
-# =========================================================
-
-st.sidebar.title("Filters")
-
-st.sidebar.markdown("### Inventory Selection")
-
-
-# -------------------------
-# Phase
-# -------------------------
-
-phase_options = sorted(
-    df["Phase"].dropna().unique().tolist()
-)
-
-phase_filter = st.sidebar.multiselect(
-    "Phase",
-    options=phase_options,
-    default=phase_options
-)
-
-
-# -------------------------
-# STATUS
-# -------------------------
-
-status_options = sorted(
-    df["STATUS"].dropna().unique().tolist()
-)
-
-status_filter = st.sidebar.multiselect(
-    "Status",
-    options=status_options,
-    default=status_options
-)
-
-
-# -------------------------
-# TYPE
-# -------------------------
-
-type_options = sorted(
-    df["Type"].dropna().unique().tolist()
-)
-
-type_filter = st.sidebar.multiselect(
-    "Type",
-    options=type_options,
-    default=type_options
-)
-
-
-# -------------------------
-# UNIT TYPE
-# -------------------------
-
-unit_type_options = sorted(
-    df["Unit Type"].dropna().unique().tolist()
-)
-
-unit_type_filter = st.sidebar.multiselect(
-    "Unit Type",
-    options=unit_type_options,
-    default=unit_type_options
-)
-
-
-# -------------------------
-# BUILDING
-# -------------------------
-
-building_options = sorted(
-    df["Building"].dropna().unique().tolist()
-)
-
-building_filter = st.sidebar.multiselect(
-    "Building",
-    options=building_options,
-    default=building_options
-)
-
-
-# =========================================================
-# FLOOR FILTER
-# =========================================================
-
-valid_floors = df["Floor"].dropna()
-
-if len(valid_floors) > 0:
-
-    min_floor = int(valid_floors.min())
-    max_floor = int(valid_floors.max())
-
-    floor_range = st.sidebar.slider(
-        "Floor",
-        min_value=min_floor,
-        max_value=max_floor,
-        value=(min_floor, max_floor)
-    )
-
-else:
-
-    floor_range = None
-
-
-# =========================================================
-# AREA FILTER
-# =========================================================
-
-valid_area = df["In/Area"].dropna()
-
-if len(valid_area) > 0:
-
-    min_area = float(valid_area.min())
-    max_area = float(valid_area.max())
-
-    area_range = st.sidebar.slider(
-        "Area (m²)",
-        min_value=float(min_area),
-        max_value=float(max_area),
-        value=(float(min_area), float(max_area)),
-        step=1.0
-    )
-
-else:
-
-    area_range = None
-
-
-# =========================================================
-# SEARCH
-# =========================================================
-
-search_text = st.sidebar.text_input(
-    "Search Unit / Client",
-    placeholder="Unit code or client name..."
-)
-
-
-# =========================================================
-# APPLY FILTERS
-# =========================================================
-
-filtered_df = df.copy()
-
-
-# Phase
-if phase_filter:
-    filtered_df = filtered_df[
-        filtered_df["Phase"].isin(phase_filter)
-    ]
-
-
-# Status
-if status_filter:
-    filtered_df = filtered_df[
-        filtered_df["STATUS"].isin(status_filter)
-    ]
-
-
-# Type
-if type_filter:
-    filtered_df = filtered_df[
-        filtered_df["Type"].isin(type_filter)
-    ]
-
-
-# Unit Type
-if unit_type_filter:
-    filtered_df = filtered_df[
-        filtered_df["Unit Type"].isin(unit_type_filter)
-    ]
-
-
-# Building
-if building_filter:
-    filtered_df = filtered_df[
-        filtered_df["Building"].isin(building_filter)
-    ]
-
-
-# Floor
-if floor_range is not None:
-
-    filtered_df = filtered_df[
-        filtered_df["Floor"].between(
-            floor_range[0],
-            floor_range[1],
-            inclusive="both"
-        )
-        | filtered_df["Floor"].isna()
-    ]
-
-
-# Area
-if area_range is not None:
-
-    filtered_df = filtered_df[
-        filtered_df["In/Area"].between(
-            area_range[0],
-            area_range[1],
-            inclusive="both"
-        )
-        | filtered_df["In/Area"].isna()
-    ]
-
-
-# Search
-if search_text.strip():
-
-    search = search_text.strip().lower()
-
-    mask = (
-        filtered_df["Unit Code"]
-        .astype(str)
-        .str.lower()
-        .str.contains(search, na=False)
-        |
-        filtered_df.get(
-            "Name of client",
-            pd.Series("", index=filtered_df.index)
-        )
-        .astype(str)
-        .str.lower()
-        .str.contains(search, na=False)
-    )
-
-    filtered_df = filtered_df[mask]
-
-
-# =========================================================
-# RESET FILTERS
-# =========================================================
-
-if st.sidebar.button("Reset Filters", use_container_width=True):
-
-    st.cache_data.clear()
+# -----------------------------
+# Sidebar - stronger filters
+# -----------------------------
+st.sidebar.header("Dashboard Filters")
+
+if st.sidebar.button("Reset filters", use_container_width=True):
+    for key in list(st.session_state.keys()):
+        if key.startswith("filter_"):
+            del st.session_state[key]
     st.rerun()
 
-
-# =========================================================
-# KPI CALCULATIONS
-# =========================================================
-
-total_units = len(filtered_df)
-
-sold_units = len(
-    filtered_df[
-        filtered_df["STATUS"].str.upper() == "SOLD"
-    ]
+phase_options = ["ALBA", "ORCHID"]
+phase_options = [p for p in phase_options if p in set(df["Phase"].dropna())]
+selected_phases = st.sidebar.multiselect(
+    "Phase", phase_options, default=phase_options, key="filter_phase"
 )
 
-available_units = len(
-    filtered_df[
-        filtered_df["STATUS"].str.upper() == "AVAILABLE"
-    ]
+status_options = sorted(df["STATUS"].dropna().unique().tolist())
+selected_statuses = st.sidebar.multiselect(
+    "Status", status_options, default=status_options, key="filter_status"
 )
 
-hold_units = len(
-    filtered_df[
-        filtered_df["STATUS"].str.upper() == "HOLD"
-    ]
+type_options = sorted(df["Type"].dropna().unique().tolist())
+selected_types = st.sidebar.multiselect(
+    "Type", type_options, default=[], key="filter_type"
 )
 
-reserved_units = len(
-    filtered_df[
-        filtered_df["STATUS"].str.upper() == "RESERVED"
-    ]
+building_options = sorted(df["Building"].dropna().unique().tolist())
+selected_buildings = st.sidebar.multiselect(
+    "Building", building_options, default=[], key="filter_building"
 )
 
-if total_units > 0:
+unit_type_options = sorted(df["Unit Type"].dropna().unique().tolist())
+selected_unit_types = st.sidebar.multiselect(
+    "Unit Type", unit_type_options, default=[], key="filter_unit_type"
+)
 
-    conversion = (
-        sold_units / total_units
-    ) * 100
-
+floor_values = pd.to_numeric(df["Floor"], errors="coerce").dropna()
+if not floor_values.empty:
+    floor_min, floor_max = int(floor_values.min()), int(floor_values.max())
+    if floor_min < floor_max:
+        selected_floor = st.sidebar.slider(
+            "Floor", floor_min, floor_max, (floor_min, floor_max),
+            key="filter_floor"
+        )
+    else:
+        selected_floor = (floor_min, floor_max)
 else:
+    selected_floor = None
 
-    conversion = 0
+rooms_values = pd.to_numeric(df["Rooms Num"], errors="coerce").dropna() if "Rooms Num" in df else pd.Series(dtype=float)
+if not rooms_values.empty:
+    room_options = sorted(rooms_values.astype(int).unique().tolist())
+    selected_rooms = st.sidebar.multiselect(
+        "Rooms", room_options, default=[], key="filter_rooms"
+    )
+else:
+    selected_rooms = []
 
+area_values = pd.to_numeric(df["In/Area"], errors="coerce").dropna()
+if not area_values.empty and area_values.min() < area_values.max():
+    area_min, area_max = float(area_values.min()), float(area_values.max())
+    selected_area = st.sidebar.slider(
+        "Area (m²)", min_value=area_min, max_value=area_max,
+        value=(area_min, area_max), step=1.0, key="filter_area"
+    )
+else:
+    selected_area = None
 
-# =========================================================
-# KPI CARDS
-# =========================================================
+search = st.sidebar.text_input(
+    "Search Unit / Client", "", key="filter_search",
+    placeholder="e.g. A-101 or client name"
+)
+
+# Apply filters
+filtered = df.copy()
+filtered = filtered[filtered["Phase"].isin(selected_phases)]
+filtered = filtered[filtered["STATUS"].isin(selected_statuses)]
+
+if selected_types:
+    filtered = filtered[filtered["Type"].isin(selected_types)]
+
+if selected_buildings:
+    filtered = filtered[filtered["Building"].isin(selected_buildings)]
+if selected_unit_types:
+    filtered = filtered[filtered["Unit Type"].isin(selected_unit_types)]
+if selected_floor is not None:
+    filtered = filtered[
+        pd.to_numeric(filtered["Floor"], errors="coerce").between(
+            selected_floor[0], selected_floor[1], inclusive="both"
+        )
+    ]
+if selected_rooms and "Rooms Num" in filtered:
+    filtered = filtered[
+        pd.to_numeric(filtered["Rooms Num"], errors="coerce").isin(selected_rooms)
+    ]
+if selected_area is not None:
+    filtered = filtered[
+        pd.to_numeric(filtered["In/Area"], errors="coerce").between(
+            selected_area[0], selected_area[1], inclusive="both"
+        )
+    ]
+
+if search.strip():
+    q = search.strip().lower()
+    unit_match = filtered["Unit Code"].fillna("").astype(str).str.lower().str.contains(q, regex=False)
+    client_match = filtered["Name of client"].fillna("").astype(str).str.lower().str.contains(q, regex=False)
+    filtered = filtered[unit_match | client_match]
+
+st.markdown('<div class="main-title">GARDENIA TOWN</div>', unsafe_allow_html=True)
+st.markdown('<div class="sub-title">ALBA vs ORCHID — Sales & Inventory Dashboard</div>', unsafe_allow_html=True)
+
+st.markdown(
+    f'<div class="filter-note">Showing <b>{len(filtered):,}</b> of '
+    f'<b>{len(df):,}</b> Gardenia Town units based on the selected filters.</div>',
+    unsafe_allow_html=True
+)
+
+# -----------------------------
+# KPIs
+# -----------------------------
+total = len(filtered)
+sold = int((filtered["STATUS"].astype(str).str.upper() == "SOLD").sum())
+available = int((filtered["STATUS"].astype(str).str.lower() == "available").sum())
+hold = int((filtered["STATUS"].astype(str).str.lower() == "hold").sum())
+reserved = int((filtered["STATUS"].astype(str).str.lower() == "reserved").sum())
+conversion = sold / total if total else 0
 
 c1, c2, c3, c4, c5 = st.columns(5)
+c1.metric("TOTAL UNITS", f"{total:,}")
+c2.metric("SOLD", f"{sold:,}")
+c3.metric("AVAILABLE", f"{available:,}")
+c4.metric("HOLD", f"{hold:,}")
+c5.metric("SALES CONVERSION", f"{conversion:.1%}")
 
+st.divider()
 
-with c1:
-
-    st.markdown(
-        f"""
-        <div class="kpi">
-            <div class="kpi-title">TOTAL UNITS</div>
-            <div class="kpi-value">
-                {total_units:,}
-            </div>
-        </div>
-        """,
-        unsafe_allow_html=True
+# -----------------------------
+# Helper for Plotly charts
+# -----------------------------
+def finish_chart(fig, height=390):
+    fig.update_layout(
+        height=height,
+        margin=dict(l=20, r=20, t=55, b=45),
+        hovermode="x unified",
+        legend_title_text="",
     )
+    return fig
 
+# -----------------------------
+# Interactive status chart
+# -----------------------------
+st.markdown('<div class="section-title">Inventory Status</div>', unsafe_allow_html=True)
 
-with c2:
+status_rows = []
+for phase in phase_options:
+    x = filtered[filtered["Phase"] == phase]
+    for status in ["SOLD", "Available", "Hold", "Reserved"]:
+        count = int(
+            (x["STATUS"].astype(str).str.upper() == status.upper()).sum()
+        )
+        status_rows.append({"Phase": phase, "Status": status, "Units": count})
 
-    st.markdown(
-        f"""
-        <div class="kpi">
-            <div class="kpi-title">SOLD</div>
-            <div class="kpi-value">
-                {sold_units:,}
-            </div>
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
-
-
-with c3:
-
-    st.markdown(
-        f"""
-        <div class="kpi">
-            <div class="kpi-title">AVAILABLE</div>
-            <div class="kpi-value">
-                {available_units:,}
-            </div>
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
-
-
-with c4:
-
-    st.markdown(
-        f"""
-        <div class="kpi">
-            <div class="kpi-title">HOLD / RESERVED</div>
-            <div class="kpi-value">
-                {hold_units + reserved_units:,}
-            </div>
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
-
-
-with c5:
-
-    st.markdown(
-        f"""
-        <div class="kpi">
-            <div class="kpi-title">SALES CONVERSION</div>
-            <div class="kpi-value">
-                {conversion:.1f}%
-            </div>
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
-
-
-# =========================================================
-# NO DATA
-# =========================================================
-
-if filtered_df.empty:
-
-    st.warning(
-        "No units match the selected filters."
-    )
-
-    st.stop()
-
-
-# =========================================================
-# CHART 1 — INVENTORY STATUS
-# =========================================================
-
-st.markdown(
-    '<div class="section-title">Inventory Status</div>',
-    unsafe_allow_html=True
-)
-
-status_counts = (
-    filtered_df["STATUS"]
-    .value_counts()
-    .reset_index()
-)
-
-status_counts.columns = [
-    "Status",
-    "Units"
-]
+status_df = pd.DataFrame(status_rows)
 
 fig_status = px.bar(
-    status_counts,
+    status_df,
     x="Status",
     y="Units",
+    color="Phase",
+    barmode="group",
     text="Units",
-    title="Units by Status"
+    category_orders={"Status": ["SOLD", "Available", "Hold", "Reserved"]},
+    labels={"Status": "Status", "Units": "Units"},
 )
+fig_status.update_traces(textposition="outside", cliponaxis=False, hovertemplate="%{x}<br>Units: %{y}<extra></extra>")
+fig_status.update_yaxes(rangemode="tozero")
+st.plotly_chart(finish_chart(fig_status), use_container_width=True)
 
-fig_status.update_traces(
-    textposition="outside"
-)
+# -----------------------------
+# Conversion + building
+# -----------------------------
+left, right = st.columns(2)
 
-fig_status.update_layout(
-    height=400,
-    margin=dict(l=20, r=20, t=60, b=20),
-    xaxis_title="",
-    yaxis_title="Units",
-    showlegend=False
-)
+with left:
+    st.markdown('<div class="section-title">Sales Conversion</div>', unsafe_allow_html=True)
+    conversion_rows = []
+    for phase in phase_options:
+        x = filtered[filtered["Phase"] == phase]
+        t = len(x)
+        s = int((x["STATUS"].astype(str).str.upper() == "SOLD").sum())
+        conversion_rows.append({"Phase": phase, "Conversion": round((s/t)*100, 1) if t else 0})
+    conv_df = pd.DataFrame(conversion_rows)
 
-st.plotly_chart(
-    fig_status,
-    use_container_width=True
-)
-
-
-# =========================================================
-# CHART 2 — SALES CONVERSION BY PHASE
-# =========================================================
-
-st.markdown(
-    '<div class="section-title">Sales Conversion by Phase</div>',
-    unsafe_allow_html=True
-)
-
-phase_summary = (
-    filtered_df
-    .groupby("Phase")
-    .agg(
-        Total=("Phase", "size"),
-        Sold=("STATUS", lambda x:
-              (x.str.upper() == "SOLD").sum())
+    fig_conv = px.bar(
+        conv_df, x="Phase", y="Conversion", text="Conversion",
+        labels={"Conversion": "Sales Conversion (%)", "Phase": "Phase"}
     )
-    .reset_index()
-)
-
-phase_summary["Conversion"] = np.where(
-    phase_summary["Total"] > 0,
-    phase_summary["Sold"]
-    / phase_summary["Total"]
-    * 100,
-    0
-)
-
-fig_conversion = px.bar(
-    phase_summary,
-    x="Phase",
-    y="Conversion",
-    text=phase_summary["Conversion"].round(1).astype(str) + "%",
-    title="Sales Conversion by Phase"
-)
-
-fig_conversion.update_traces(
-    textposition="outside"
-)
-
-fig_conversion.update_layout(
-    height=400,
-    yaxis_title="Conversion %",
-    xaxis_title="",
-    yaxis=dict(range=[0, 100]),
-    margin=dict(l=20, r=20, t=60, b=20)
-)
-
-st.plotly_chart(
-    fig_conversion,
-    use_container_width=True
-)
-
-
-# =========================================================
-# TWO COLUMN SECTION
-# =========================================================
-
-col1, col2 = st.columns(2)
-
-
-# =========================================================
-# AVAILABLE UNITS BY BUILDING
-# =========================================================
-
-with col1:
-
-    st.markdown(
-        '<div class="section-title">'
-        'Available Units by Building'
-        '</div>',
-        unsafe_allow_html=True
+    fig_conv.update_traces(
+        texttemplate="%{text:.1f}%", textposition="outside",
+        cliponaxis=False,
+        hovertemplate="%{x}<br>Conversion: %{y:.1f}%<extra></extra>"
     )
+    fig_conv.update_yaxes(range=[0, max(100, float(conv_df["Conversion"].max()) + 10)])
+    st.plotly_chart(finish_chart(fig_conv, 350), use_container_width=True)
 
-    building_available = (
-        filtered_df[
-            filtered_df["STATUS"].str.upper() == "AVAILABLE"
-        ]
-        .groupby("Building")
-        .size()
-        .reset_index(name="Available Units")
-        .sort_values(
-            "Available Units",
-            ascending=False
-        )
-        .head(20)
-    )
-
-    if not building_available.empty:
-
-        fig_building = px.bar(
-            building_available,
-            x="Building",
-            y="Available Units",
-            text="Available Units",
-            title="Top Buildings by Available Inventory"
-        )
-
-        fig_building.update_traces(
-            textposition="outside"
-        )
-
-        fig_building.update_layout(
-            height=450,
-            xaxis_title="Building",
-            yaxis_title="Available Units",
-            margin=dict(
-                l=20,
-                r=20,
-                t=60,
-                b=20
-            )
-        )
-
-        st.plotly_chart(
-            fig_building,
-            use_container_width=True
-        )
-
-    else:
-
-        st.info("No available units in the selected filters.")
-
-
-# =========================================================
-# UNIT TYPE MIX
-# =========================================================
-
-with col2:
-
-    st.markdown(
-        '<div class="section-title">Unit Type Mix</div>',
-        unsafe_allow_html=True
-    )
-
-    unit_type_counts = (
-        filtered_df["Unit Type"]
-        .value_counts()
-        .reset_index()
-    )
-
-    unit_type_counts.columns = [
-        "Unit Type",
-        "Units"
+with right:
+    st.markdown('<div class="section-title">Available Units by Building</div>', unsafe_allow_html=True)
+    available_df = filtered[
+        filtered["STATUS"].astype(str).str.lower() == "available"
     ]
+    building_df = (
+        available_df.groupby(["Building", "Phase"])
+        .size()
+        .reset_index(name="Units")
+    )
+    fig_build = px.bar(
+        building_df,
+        x="Building", y="Units", color="Phase",
+        barmode="group", text="Units",
+        labels={"Building": "Building", "Units": "Available Units"}
+    )
+    fig_build.update_traces(
+        textposition="outside", cliponaxis=False,
+        hovertemplate="%{x}<br>Available: %{y}<extra></extra>"
+    )
+    fig_build.update_xaxes(tickangle=-45)
+    st.plotly_chart(finish_chart(fig_build, 350), use_container_width=True)
 
-    fig_type = px.pie(
-        unit_type_counts,
-        names="Unit Type",
-        values="Units",
-        hole=0.45,
-        title="Inventory by Unit Type"
+# -----------------------------
+# Unit type + phase summary
+# -----------------------------
+left, right = st.columns(2)
+
+with left:
+    st.markdown('<div class="section-title">Unit Type Mix</div>', unsafe_allow_html=True)
+    type_df = filtered.groupby(["Unit Type", "Phase"]).size().reset_index(name="Units")
+    fig_type = px.bar(
+        type_df, x="Unit Type", y="Units", color="Phase",
+        barmode="group", text="Units",
+        labels={"Unit Type": "Unit Type", "Units": "Units"}
+    )
+    fig_type.update_traces(textposition="outside", cliponaxis=False)
+    fig_type.update_xaxes(tickangle=-35)
+    st.plotly_chart(finish_chart(fig_type, 390), use_container_width=True)
+
+with right:
+    st.markdown('<div class="section-title">Phase Summary</div>', unsafe_allow_html=True)
+    phase_summary = []
+    for phase in phase_options:
+        x = filtered[filtered["Phase"] == phase]
+        t = len(x)
+        s = int((x["STATUS"].astype(str).str.upper() == "SOLD").sum())
+        a = int((x["STATUS"].astype(str).str.lower() == "available").sum())
+        phase_summary.append({
+            "Phase": phase,
+            "Total": t,
+            "Sold": s,
+            "Available": a,
+            "Conversion": round((s/t)*100, 1) if t else 0
+        })
+    st.dataframe(
+        pd.DataFrame(phase_summary),
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            "Conversion": st.column_config.NumberColumn("Conversion", format="%.1f%%")
+        }
     )
 
-    fig_type.update_traces(
-        textinfo="label+percent",
-        hovertemplate=(
-            "<b>%{label}</b><br>"
-            "Units: %{value}<br>"
-            "Share: %{percent}"
-            "<extra></extra>"
-        )
-    )
-
-    fig_type.update_layout(
-        height=450,
-        margin=dict(
-            l=20,
-            r=20,
-            t=60,
-            b=20
-        )
-    )
-
-    st.plotly_chart(
-        fig_type,
-        use_container_width=True
-    )
-
-
-# =========================================================
-# TYPE ANALYSIS
-# =========================================================
-
-st.markdown(
-    '<div class="section-title">Sales Conversion by Type</div>',
-    unsafe_allow_html=True
-)
-
-type_summary = (
-    filtered_df
-    .groupby("Type")
-    .agg(
-        Total=("Type", "size"),
-        Sold=("STATUS", lambda x:
-              (x.str.upper() == "SOLD").sum()),
-        Available=("STATUS", lambda x:
-                   (x.str.upper() == "AVAILABLE").sum())
-    )
-    .reset_index()
-)
-
-type_summary["Conversion"] = np.where(
-    type_summary["Total"] > 0,
-    type_summary["Sold"]
-    / type_summary["Total"]
-    * 100,
-    0
-)
-
-type_summary = type_summary.sort_values(
-    "Conversion",
-    ascending=False
-)
-
-fig_type_conversion = px.bar(
-    type_summary,
-    x="Type",
-    y="Conversion",
-    text=type_summary["Conversion"].round(1).astype(str) + "%",
-    hover_data=[
-        "Total",
-        "Sold",
-        "Available"
-    ],
-    title="Sales Conversion by Type"
-)
-
-fig_type_conversion.update_traces(
-    textposition="outside"
-)
-
-fig_type_conversion.update_layout(
-    height=450,
-    yaxis_title="Conversion %",
-    xaxis_title="Type",
-    yaxis=dict(range=[0, 100]),
-    margin=dict(
-        l=20,
-        r=20,
-        t=60,
-        b=20
-    )
-)
-
-st.plotly_chart(
-    fig_type_conversion,
-    use_container_width=True
-)
-
-
-# =========================================================
-# PHASE SUMMARY TABLE
-# =========================================================
-
-st.markdown(
-    '<div class="section-title">Phase Summary</div>',
-    unsafe_allow_html=True
-)
-
-phase_table = (
-    filtered_df
-    .groupby("Phase")
-    .agg(
-        Total=("Phase", "size"),
-        Sold=("STATUS", lambda x:
-              (x.str.upper() == "SOLD").sum()),
-        Available=("STATUS", lambda x:
-                   (x.str.upper() == "AVAILABLE").sum()),
-        Hold=("STATUS", lambda x:
-              (x.str.upper() == "HOLD").sum()),
-        Reserved=("STATUS", lambda x:
-                  (x.str.upper() == "RESERVED").sum())
-    )
-    .reset_index()
-)
-
-phase_table["Conversion"] = (
-    phase_table["Sold"]
-    / phase_table["Total"]
-    * 100
-)
-
-phase_table["Conversion"] = (
-    phase_table["Conversion"]
-    .round(1)
-    .astype(str)
-    + "%"
-)
-
-st.dataframe(
-    phase_table,
-    use_container_width=True,
-    hide_index=True
-)
-#data
-st.markdown(
-    '<div class="section-title">Filtered Unit Details</div>',
-    unsafe_allow_html=True
-)
-
-display_columns = [
-    "Phase",
-    "Unit Code",
-    "Unit Type",
-    "Building",
-    "Floor",
-    "Type",
-    "In/Area",
-    "STATUS"
+# -----------------------------
+# Detail data
+# -----------------------------
+st.markdown('<div class="section-title">Filtered Unit Details</div>', unsafe_allow_html=True)
+display_cols = [
+    c for c in [
+        "Phase", "Unit Code", "Unit Type", "Building", "Floor",
+        "Apartment NO.", "Type", "In/Area", "NEW M.PRICE",
+        "STATUS", "Rooms Num", "Name of client"
+    ] if c in filtered.columns
 ]
 
-# Add client if available
-if "Name of client" in filtered_df.columns:
-    display_columns.append("Name of client")
-
-display_df = filtered_df[
-    [col for col in display_columns if col in filtered_df.columns]
-].copy()
-
 st.dataframe(
-    display_df,
+    filtered[display_cols].reset_index(drop=True),
     use_container_width=True,
     hide_index=True,
-    height=500
+    height=430,
 )
