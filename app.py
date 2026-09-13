@@ -356,8 +356,3 @@ st.dataframe(
     hide_index=True,
     height=430,
 )
-
-st.caption(
-    "Charts are interactive: hover for details, click legend items to show/hide phases, "
-    "and use the Plotly toolbar to zoom or reset the view."
-)
