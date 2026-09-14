@@ -1084,11 +1084,6 @@ st.markdown(
     '<div class="section-title">Unit Data</div>',
     unsafe_allow_html=True,
 )
-
-st.caption(
-    "Use the small search below to find a unit, then choose Edit or Delete."
-)
-
 display_cols = [
     c for c in [
         "Phase", "Unit Code", "Unit Type", "Building", "Floor",
@@ -1097,7 +1092,6 @@ display_cols = [
     ]
     if c in filtered.columns
 ]
-
 st.dataframe(
     filtered[display_cols],
     use_container_width=True,
