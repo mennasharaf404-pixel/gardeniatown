@@ -346,34 +346,14 @@ with right:
         }
     )
 
-# -----------------------------
-# Detail data
-# -----------------------------
-st.markdown('<div class="section-title">Filtered Unit Details</div>', unsafe_allow_html=True)
-display_cols = [
-    c for c in [
-        "Phase", "Unit Code", "Unit Type", "Building", "Floor",
-        "Apartment NO.", "Type", "In/Area", "NEW M.PRICE",
-        "STATUS", "Rooms Num", "Name of client"
-    ] if c in filtered.columns
-]
-
-st.dataframe(
-    filtered[display_cols].reset_index(drop=True),
-    use_container_width=True,
-    hide_index=True,
-    height=430,
-)
-
 # ============================================================
-# DATA MANAGEMENT - ADD / EDIT / DELETE / EXPORT
+# DATA + QUICK ACTIONS
 # ============================================================
-st.divider()
-st.markdown('<div class="section-title">Data Management</div>', unsafe_allow_html=True)
-st.caption("Add, edit, or delete Gardenia Town records. Changes are saved to the Excel file.")
-
 from io import BytesIO
 from openpyxl import load_workbook
+
+st.divider()
+st.markdown('<div class="section-title">Unit Data</div>', unsafe_allow_html=True)
 
 if "editable_df" not in st.session_state:
     st.session_state.editable_df = df.copy()
@@ -409,165 +389,322 @@ def save_to_excel(dataframe):
     wb.save(DATA_FILE)
     load_data.clear()
 
+def clean_before_save(dataframe):
+    result = dataframe.copy()
+
+    for col in ["In/Area", "NEW M.PRICE", "M.PRICE", "Total Unit", "Rooms Num", "Floor"]:
+        if col in result.columns:
+            result[col] = pd.to_numeric(result[col], errors="coerce")
+
+    for col in [
+        "Phase", "Unit Code", "Unit Type", "Building", "Floor",
+        "Apartment NO.", "Type", "STATUS", "Rooms Num", "Name of client"
+    ]:
+        if col in result.columns:
+            result[col] = result[col].astype("string").str.strip()
+
+    if "Phase" in result.columns:
+        result["Phase"] = result["Phase"].str.upper()
+
+    return result
+
 # -----------------------------
-# Add new unit
+# Edit dialog
 # -----------------------------
-with st.expander("➕ Add New Unit", expanded=False):
-    add_cols = st.columns(4)
+@st.dialog("✏️ Edit Unit")
+def edit_unit_dialog(row_id):
+    data = st.session_state.editable_df
+    row = data.loc[row_id]
 
-    with add_cols[0]:
-        add_phase = st.selectbox("Phase", ["ALBA", "ORCHID"], key="add_phase")
-        add_unit_code = st.text_input("Unit Code", key="add_unit_code")
-        add_unit_type = st.text_input("Unit Type", key="add_unit_type")
+    c1, c2 = st.columns(2)
 
-    with add_cols[1]:
-        add_building = st.text_input("Building", key="add_building")
-        add_floor = st.number_input("Floor", value=0, step=1, key="add_floor")
-        add_apartment = st.text_input("Apartment NO.", key="add_apartment")
-
-    with add_cols[2]:
-        add_type = st.text_input("Type", key="add_type")
-        add_area = st.number_input("In/Area", min_value=0.0, value=0.0, step=1.0, key="add_area")
-        add_new_price = st.number_input("NEW M.PRICE", min_value=0.0, value=0.0, step=1.0, key="add_new_price")
-
-    with add_cols[3]:
-        add_status = st.selectbox(
-            "STATUS", ["SOLD", "Available", "Hold", "Reserved"], key="add_status"
+    with c1:
+        phase = st.selectbox(
+            "Phase", ["ALBA", "ORCHID"],
+            index=["ALBA", "ORCHID"].index(str(row.get("Phase", "")))
+            if str(row.get("Phase", "")) in ["ALBA", "ORCHID"] else 0,
+            key=f"edit_phase_{row_id}"
         )
-        add_rooms = st.number_input("Rooms Num", min_value=0, value=0, step=1, key="add_rooms")
-        add_client = st.text_input("Name of client", key="add_client")
+        unit_code = st.text_input(
+            "Unit Code", value="" if pd.isna(row.get("Unit Code")) else str(row.get("Unit Code")),
+            key=f"edit_code_{row_id}"
+        )
+        unit_type = st.text_input(
+            "Unit Type", value="" if pd.isna(row.get("Unit Type")) else str(row.get("Unit Type")),
+            key=f"edit_unit_type_{row_id}"
+        )
+        building = st.text_input(
+            "Building", value="" if pd.isna(row.get("Building")) else str(row.get("Building")),
+            key=f"edit_building_{row_id}"
+        )
+        apartment = st.text_input(
+            "Apartment NO.", value="" if pd.isna(row.get("Apartment NO.")) else str(row.get("Apartment NO.")),
+            key=f"edit_apartment_{row_id}"
+        )
+        unit_area = st.number_input(
+            "In/Area",
+            value=float(row["In/Area"]) if pd.notna(row.get("In/Area")) else 0.0,
+            key=f"edit_area_{row_id}"
+        )
 
-    if st.button("Add Unit", type="primary", use_container_width=True):
-        if not add_unit_code.strip():
-            st.warning("Please enter a Unit Code.")
-        else:
-            new_row = {col: pd.NA for col in editable_df.columns}
+    with c2:
+        floor = st.number_input(
+            "Floor",
+            value=int(row["Floor"]) if pd.notna(row.get("Floor")) else 0,
+            step=1,
+            key=f"edit_floor_{row_id}"
+        )
+        unit_type2 = st.text_input(
+            "Type", value="" if pd.isna(row.get("Type")) else str(row.get("Type")),
+            key=f"edit_type_{row_id}"
+        )
+        status_values = ["SOLD", "Available", "Hold", "Reserved"]
+        current_status = str(row.get("STATUS", "Available"))
+        status = st.selectbox(
+            "STATUS", status_values,
+            index=status_values.index(current_status) if current_status in status_values else 0,
+            key=f"edit_status_{row_id}"
+        )
+        new_price = st.number_input(
+            "NEW M.PRICE",
+            value=float(row["NEW M.PRICE"]) if pd.notna(row.get("NEW M.PRICE")) else 0.0,
+            key=f"edit_price_{row_id}"
+        )
+        rooms = st.number_input(
+            "Rooms Num",
+            value=int(row["Rooms Num"]) if pd.notna(row.get("Rooms Num")) else 0,
+            min_value=0,
+            step=1,
+            key=f"edit_rooms_{row_id}"
+        )
+        client = st.text_input(
+            "Name of client",
+            value="" if pd.isna(row.get("Name of client")) else str(row.get("Name of client")),
+            key=f"edit_client_{row_id}"
+        )
 
-            values = {
-                "Phase": add_phase,
-                "Unit Code": add_unit_code.strip(),
-                "Unit Type": add_unit_type.strip(),
-                "Building": add_building.strip(),
-                "Floor": add_floor,
-                "Apartment NO.": add_apartment.strip(),
-                "Type": add_type.strip(),
-                "In/Area": add_area,
-                "NEW M.PRICE": add_new_price,
-                "STATUS": add_status,
-                "Rooms Num": add_rooms,
-                "Name of client": add_client.strip(),
-            }
+    if st.button("💾 Save", type="primary", use_container_width=True):
+        if not unit_code.strip():
+            st.warning("Unit Code is required.")
+            return
 
-            for col, value in values.items():
-                if col in new_row:
-                    new_row[col] = value
+        updated = st.session_state.editable_df.copy()
 
-            updated = pd.concat(
-                [editable_df, pd.DataFrame([new_row])],
-                ignore_index=True
-            )
+        values = {
+            "Phase": phase,
+            "Unit Code": unit_code.strip(),
+            "Unit Type": unit_type.strip(),
+            "Building": building.strip(),
+            "Floor": floor,
+            "Apartment NO.": apartment.strip(),
+            "Type": unit_type2.strip(),
+            "In/Area": unit_area,
+            "NEW M.PRICE": new_price,
+            "STATUS": status,
+            "Rooms Num": rooms,
+            "Name of client": client.strip(),
+        }
 
-            try:
-                save_to_excel(updated)
-                st.session_state.editable_df = updated
-                st.success("Unit added and saved to Excel.")
-                st.rerun()
-            except Exception as e:
-                st.error(f"Could not save the new unit: {e}")
+        for col, value in values.items():
+            if col in updated.columns:
+                updated.at[row_id, col] = value
 
-# -----------------------------
-# Edit existing units
-# -----------------------------
-with st.expander("✏️ Edit Units", expanded=False):
-    st.caption("Edit cells directly, then click Save Changes.")
-
-    edited_df = st.data_editor(
-        st.session_state.editable_df.copy(),
-        use_container_width=True,
-        height=500,
-        num_rows="fixed",
-        hide_index=False,
-        key="unit_editor",
-    )
-
-    if st.button("💾 Save Changes", type="primary", use_container_width=True):
         try:
-            for col in ["In/Area", "NEW M.PRICE", "M.PRICE", "Total Unit", "Rooms Num", "Floor"]:
-                if col in edited_df.columns:
-                    edited_df[col] = pd.to_numeric(edited_df[col], errors="coerce")
-
-            for col in [
-                "Phase", "Unit Code", "Unit Type", "Building", "Floor",
-                "Apartment NO.", "Type", "STATUS", "Rooms Num", "Name of client"
-            ]:
-                if col in edited_df.columns:
-                    edited_df[col] = edited_df[col].astype("string").str.strip()
-
-            if "Phase" in edited_df.columns:
-                edited_df["Phase"] = edited_df["Phase"].str.upper()
-
-            save_to_excel(edited_df)
-            st.session_state.editable_df = edited_df.copy()
-            st.success("Changes saved successfully to Excel.")
+            updated = clean_before_save(updated)
+            save_to_excel(updated)
+            st.session_state.editable_df = updated
+            st.success("Unit updated successfully.")
             st.rerun()
         except Exception as e:
             st.error(f"Could not save changes: {e}")
 
 # -----------------------------
-# Delete units
+# Add dialog
 # -----------------------------
-with st.expander("🗑️ Delete Units", expanded=False):
-    st.caption("Select one or more Row IDs, then delete them.")
+@st.dialog("➕ Add New Unit")
+def add_unit_dialog():
+    c1, c2 = st.columns(2)
 
-    delete_view = st.session_state.editable_df.reset_index().rename(
-        columns={"index": "Row ID"}
+    with c1:
+        phase = st.selectbox("Phase", ["ALBA", "ORCHID"], key="quick_add_phase")
+        unit_code = st.text_input("Unit Code", key="quick_add_code")
+        unit_type = st.text_input("Unit Type", key="quick_add_unit_type")
+        building = st.text_input("Building", key="quick_add_building")
+        apartment = st.text_input("Apartment NO.", key="quick_add_apartment")
+        area = st.number_input("In/Area", min_value=0.0, value=0.0, key="quick_add_area")
+
+    with c2:
+        floor = st.number_input("Floor", value=0, step=1, key="quick_add_floor")
+        unit_type_value = st.text_input("Type", key="quick_add_type")
+        status = st.selectbox(
+            "STATUS", ["SOLD", "Available", "Hold", "Reserved"],
+            index=1, key="quick_add_status"
+        )
+        new_price = st.number_input("NEW M.PRICE", min_value=0.0, value=0.0, key="quick_add_price")
+        rooms = st.number_input("Rooms Num", min_value=0, value=0, step=1, key="quick_add_rooms")
+        client = st.text_input("Name of client", key="quick_add_client")
+
+    if st.button("➕ Add Unit", type="primary", use_container_width=True):
+        if not unit_code.strip():
+            st.warning("Unit Code is required.")
+            return
+
+        current = st.session_state.editable_df.copy()
+        new_row = {col: pd.NA for col in current.columns}
+
+        values = {
+            "Phase": phase,
+            "Unit Code": unit_code.strip(),
+            "Unit Type": unit_type.strip(),
+            "Building": building.strip(),
+            "Floor": floor,
+            "Apartment NO.": apartment.strip(),
+            "Type": unit_type_value.strip(),
+            "In/Area": area,
+            "NEW M.PRICE": new_price,
+            "STATUS": status,
+            "Rooms Num": rooms,
+            "Name of client": client.strip(),
+        }
+
+        for col, value in values.items():
+            if col in new_row:
+                new_row[col] = value
+
+        updated = pd.concat(
+            [current, pd.DataFrame([new_row])],
+            ignore_index=True
+        )
+
+        try:
+            updated = clean_before_save(updated)
+            save_to_excel(updated)
+            st.session_state.editable_df = updated
+            st.success("Unit added successfully.")
+            st.rerun()
+        except Exception as e:
+            st.error(f"Could not add the unit: {e}")
+
+# -----------------------------
+# Compact action bar
+# -----------------------------
+action1, action2, action3, action4 = st.columns([1, 1, 1, 1])
+
+with action1:
+    if st.button("➕", help="Add a new unit", key="add_icon", use_container_width=True):
+        add_unit_dialog()
+
+with action2:
+    st.caption("Add")
+
+with action3:
+    st.download_button(
+        "📥",
+        data=BytesIO(),
+        disabled=True,
+        help="Use the Export button below to download the current filtered data.",
+        key="export_placeholder"
     )
 
-    delete_cols = [
-        c for c in [
-            "Row ID", "Phase", "Unit Code", "Unit Type",
-            "Building", "Apartment NO.", "STATUS", "Name of client"
-        ] if c in delete_view.columns
-    ]
+# -----------------------------
+# Compact data table with row actions
+# -----------------------------
+st.caption("Use the small ✏️ and 🗑️ icons beside a unit to edit or delete it.")
 
-    st.dataframe(
-        delete_view[delete_cols],
-        use_container_width=True,
-        hide_index=True,
-        height=300
-    )
+display_cols = [
+    c for c in [
+        "Phase", "Unit Code", "Unit Type", "Building", "Floor",
+        "Apartment NO.", "Type", "In/Area", "NEW M.PRICE",
+        "STATUS", "Rooms Num", "Name of client"
+    ] if c in filtered.columns
+]
 
-    delete_ids = st.multiselect(
-        "Select Row ID(s) to delete",
-        options=delete_view["Row ID"].tolist(),
-        format_func=lambda x: (
-            f"{x} — {delete_view.loc[delete_view['Row ID'] == x, 'Unit Code'].iloc[0]}"
-            if "Unit Code" in delete_view.columns else str(x)
-        ),
-        key="delete_ids"
-    )
+# Use the actual editable dataframe indexes so actions target the correct records.
+visible = filtered[display_cols].copy()
 
-    if st.button("Delete Selected Units", type="secondary", use_container_width=True):
-        if not delete_ids:
-            st.warning("Please select at least one row.")
-        else:
-            try:
-                updated = (
-                    st.session_state.editable_df
-                    .drop(index=delete_ids)
-                    .reset_index(drop=True)
-                )
-                save_to_excel(updated)
-                st.session_state.editable_df = updated
-                st.success(f"{len(delete_ids)} unit(s) deleted and saved to Excel.")
+if visible.empty:
+    st.info("No units match the selected filters.")
+else:
+    header = st.columns([0.5] + [1.15] * len(display_cols) + [0.42, 0.42])
+
+    header[0].markdown("**#**")
+    for i, col in enumerate(display_cols, start=1):
+        header[i].markdown(f"**{col}**")
+    header[-2].markdown("**✏️**")
+    header[-1].markdown("**🗑️**")
+
+    for row_id, row in visible.iterrows():
+        cells = st.columns([0.5] + [1.15] * len(display_cols) + [0.42, 0.42])
+
+        cells[0].write(str(row_id + 1))
+
+        for i, col in enumerate(display_cols, start=1):
+            value = row[col]
+            if pd.isna(value):
+                value = "—"
+            elif col in ["In/Area", "NEW M.PRICE"]:
+                try:
+                    value = f"{float(value):,.0f}"
+                except Exception:
+                    value = str(value)
+            cells[i].write(str(value))
+
+        with cells[-2]:
+            if st.button(
+                "✏️",
+                key=f"edit_row_{row_id}",
+                help=f"Edit {row.get('Unit Code', '')}",
+            ):
+                edit_unit_dialog(row_id)
+
+        with cells[-1]:
+            if st.button(
+                "🗑️",
+                key=f"delete_row_{row_id}",
+                help=f"Delete {row.get('Unit Code', '')}",
+            ):
+                st.session_state.delete_confirm_id = row_id
                 st.rerun()
-            except Exception as e:
-                st.error(f"Could not delete the selected units: {e}")
 
 # -----------------------------
-# Export
+# Delete confirmation
 # -----------------------------
-with st.expander("📥 Export Data", expanded=False):
+if "delete_confirm_id" in st.session_state:
+    delete_id = st.session_state.delete_confirm_id
+
+    if delete_id in st.session_state.editable_df.index:
+        delete_code = st.session_state.editable_df.loc[delete_id, "Unit Code"]
+
+        st.warning(f"Delete unit **{delete_code}**? This will permanently update the Excel file.")
+
+        dc1, dc2 = st.columns(2)
+
+        with dc1:
+            if st.button("Delete", type="primary", use_container_width=True, key="confirm_delete"):
+                try:
+                    updated = (
+                        st.session_state.editable_df
+                        .drop(index=delete_id)
+                        .reset_index(drop=True)
+                    )
+                    updated = clean_before_save(updated)
+                    save_to_excel(updated)
+                    st.session_state.editable_df = updated
+                    del st.session_state.delete_confirm_id
+                    st.success("Unit deleted successfully.")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Could not delete the unit: {e}")
+
+        with dc2:
+            if st.button("Cancel", use_container_width=True, key="cancel_delete"):
+                del st.session_state.delete_confirm_id
+                st.rerun()
+
+# -----------------------------
+# Export filtered data
+# -----------------------------
+with st.expander("📥 Export", expanded=False):
     export_cols = [
         c for c in [
             "Phase", "Unit Code", "Unit Type", "Building", "Floor",
@@ -585,7 +722,7 @@ with st.expander("📥 Export Data", expanded=False):
     export_buffer.seek(0)
 
     st.download_button(
-        "Download Filtered Data as Excel",
+        "📥 Download Filtered Data as Excel",
         data=export_buffer,
         file_name="Gardenia_Town_Export.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
