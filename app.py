@@ -800,7 +800,283 @@ with right:
 
 
 # =========================================================
-# DATA MANAGEMENT — FAST VERSION
+# ADD / EDIT DIALOGS
+# =========================================================
+# The dialogs below use choices taken directly from the
+# existing Excel data. This makes entry easier and avoids
+# changing the original values or terminology.
+
+def show_edit_dialog(row_index):
+    row = df.loc[row_index].copy()
+    columns = list(df.columns)
+
+    @st.dialog("Edit Unit")
+    def dialog():
+        st.caption(
+            "Update the selected unit. Changes are saved only when "
+            "you click Save changes."
+        )
+
+        edited = {}
+
+        # Use choices from the existing workbook wherever possible.
+        choice_columns = {
+            "Phase": sorted(df["Phase"].dropna().astype(str).unique().tolist()),
+            "Type": sorted(df["Type"].dropna().astype(str).unique().tolist()),
+            "STATUS": sorted(df["STATUS"].dropna().astype(str).unique().tolist()),
+            "Unit Type": sorted(df["Unit Type"].dropna().astype(str).unique().tolist()),
+            "Building": sorted(df["Building"].dropna().astype(str).unique().tolist()),
+        }
+
+        numeric_columns = {
+            "Floor", "Rooms Num", "In/Area", "NEW M.PRICE",
+            "M.PRICE", "Total Unit"
+        }
+
+        half = (len(columns) + 1) // 2
+        ui_cols = st.columns(2)
+
+        for ui_col, group in zip(ui_cols, [columns[:half], columns[half:]]):
+            with ui_col:
+                for column in group:
+                    value = clean_value(row[column])
+
+                    if column in choice_columns:
+                        options = choice_columns[column]
+                        current = "" if value is None else str(value)
+
+                        if current and current not in options:
+                            options = [current] + options
+
+                        edited[column] = st.selectbox(
+                            column,
+                            options if options else [""],
+                            index=options.index(current) if current in options else 0,
+                            key=f"edit_choice_{row_index}_{column}",
+                        )
+
+                    elif column in numeric_columns:
+                        try:
+                            number_value = float(value) if value is not None else 0.0
+                        except Exception:
+                            number_value = 0.0
+
+                        edited[column] = st.number_input(
+                            column,
+                            value=number_value,
+                            key=f"edit_num_{row_index}_{column}",
+                        )
+
+                    else:
+                        edited[column] = st.text_input(
+                            column,
+                            value="" if value is None else str(value),
+                            key=f"edit_text_{row_index}_{column}",
+                        )
+
+        save_col, cancel_col = st.columns(2)
+
+        with save_col:
+            if st.button(
+                "Save changes",
+                type="primary",
+                use_container_width=True,
+            ):
+                for column in columns:
+                    df.loc[row_index, column] = edited[column]
+
+                try:
+                    save_dataframe_to_excel(df)
+                    st.success("Changes saved successfully.")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Could not save changes: {e}")
+
+        with cancel_col:
+            if st.button("Cancel", use_container_width=True):
+                st.rerun()
+
+    dialog()
+
+
+def show_add_dialog():
+    columns = list(df.columns)
+
+    @st.dialog("Add New Unit")
+    def dialog():
+        st.caption(
+            "Choose values from the existing data where possible. "
+            "Only the new record will be added."
+        )
+
+        new_values = {}
+
+        # Choices are generated from the real Excel data.
+        # Nothing is invented or changed in the existing records.
+        choice_columns = {
+            "Phase": sorted(df["Phase"].dropna().astype(str).unique().tolist()),
+            "Type": sorted(df["Type"].dropna().astype(str).unique().tolist()),
+            "STATUS": sorted(df["STATUS"].dropna().astype(str).unique().tolist()),
+            "Unit Type": sorted(df["Unit Type"].dropna().astype(str).unique().tolist()),
+            "Building": sorted(df["Building"].dropna().astype(str).unique().tolist()),
+        }
+
+        numeric_columns = {
+            "Floor", "Rooms Num", "In/Area", "NEW M.PRICE",
+            "M.PRICE", "Total Unit"
+        }
+
+        half = (len(columns) + 1) // 2
+        ui_cols = st.columns(2)
+
+        for ui_col, group in zip(ui_cols, [columns[:half], columns[half:]]):
+            with ui_col:
+                for column in group:
+
+                    if column in choice_columns:
+                        options = choice_columns[column]
+
+                        if options:
+                            new_values[column] = st.selectbox(
+                                column,
+                                [""] + options,
+                                index=0,
+                                key=f"add_choice_{column}",
+                            )
+                        else:
+                            new_values[column] = st.text_input(
+                                column,
+                                key=f"add_text_{column}",
+                            )
+
+                    elif column in numeric_columns:
+                        new_values[column] = st.number_input(
+                            column,
+                            value=0.0,
+                            key=f"add_num_{column}",
+                        )
+
+                    else:
+                        new_values[column] = st.text_input(
+                            column,
+                            value="",
+                            key=f"add_text_{column}",
+                        )
+
+        # Required fields
+        required_add = ["Phase", "Unit Code", "Unit Type", "Building", "STATUS"]
+
+        missing_required = [
+            c for c in required_add
+            if not str(new_values.get(c, "")).strip()
+        ]
+
+        save_col, cancel_col = st.columns(2)
+
+        with save_col:
+            if st.button(
+                "Add unit",
+                type="primary",
+                use_container_width=True,
+            ):
+                if missing_required:
+                    st.error(
+                        "Please complete: "
+                        + ", ".join(missing_required)
+                    )
+                    return
+
+                new_row = {}
+
+                for column in columns:
+                    value = new_values.get(column)
+
+                    if isinstance(value, str) and not value.strip():
+                        value = None
+
+                    new_row[column] = value
+
+                # Prevent accidentally creating a duplicate Unit Code.
+                existing_codes = (
+                    df["Unit Code"]
+                    .dropna()
+                    .astype(str)
+                    .str.strip()
+                    .str.lower()
+                )
+
+                new_code = str(new_row["Unit Code"]).strip().lower()
+
+                if new_code in set(existing_codes):
+                    st.error(
+                        "This Unit Code already exists. "
+                        "Please enter a different Unit Code."
+                    )
+                    return
+
+                updated_df = pd.concat(
+                    [
+                        df,
+                        pd.DataFrame([new_row], columns=columns),
+                    ],
+                    ignore_index=True,
+                )
+
+                try:
+                    save_dataframe_to_excel(updated_df)
+                    st.success("New unit added successfully.")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Could not add the unit: {e}")
+
+        with cancel_col:
+            if st.button("Cancel", use_container_width=True):
+                st.rerun()
+
+    dialog()
+
+
+def show_delete_dialog(row_index):
+    unit_code = str(df.loc[row_index, "Unit Code"])
+    phase = str(df.loc[row_index, "Phase"])
+    building = str(df.loc[row_index, "Building"])
+
+    @st.dialog("Delete Unit")
+    def dialog():
+        st.warning(
+            f"Are you sure you want to delete Unit Code '{unit_code}' "
+            f"from {phase} / Building {building}?"
+        )
+
+        st.caption(
+            "This removes only the selected record after confirmation."
+        )
+
+        yes_col, no_col = st.columns(2)
+
+        with yes_col:
+            if st.button(
+                "Delete",
+                type="primary",
+                use_container_width=True,
+            ):
+                updated_df = df.drop(index=row_index).reset_index(drop=True)
+
+                try:
+                    save_dataframe_to_excel(updated_df)
+                    st.success("Unit deleted successfully.")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Could not delete the unit: {e}")
+
+        with no_col:
+            if st.button("Cancel", use_container_width=True):
+                st.rerun()
+
+    dialog()
+
+# =========================================================
+# DATA MANAGEMENT — FAST & EASY
 # =========================================================
 st.divider()
 
@@ -810,7 +1086,7 @@ st.markdown(
 )
 
 st.caption(
-    "The table is display-only for speed. Select one unit below to edit or delete it."
+    "Use the small search below to find a unit, then choose Edit or Delete."
 )
 
 display_cols = [
@@ -829,52 +1105,109 @@ st.dataframe(
     height=430,
 )
 
-# Use original dataframe index so duplicate Unit Codes are still safe.
-if len(filtered) > 0:
-    selector_options = filtered.index.tolist()
+# ---------------------------------------------------------
+# Compact search + actions
+# ---------------------------------------------------------
+st.markdown("**Unit actions**")
 
-    def format_unit(idx):
-        row = df.loc[idx]
-        return (
-            f"{row['Unit Code']}  |  "
-            f"{row['Phase']}  |  "
-            f"{row['Building']}  |  "
-            f"{row['STATUS']}"
-        )
+search_col, selected_col, edit_col, delete_col, add_col, export_col = st.columns(
+    [1.35, 2.1, 0.55, 0.55, 0.55, 1.1]
+)
 
-    selected_row = st.selectbox(
-        "Select a unit",
-        selector_options,
-        format_func=format_unit,
-        key="selected_unit_row",
+with search_col:
+    action_search = st.text_input(
+        "Search",
+        value="",
+        placeholder="Unit code / client",
+        key="action_search",
+        label_visibility="collapsed",
     )
 
-    action1, action2, action3, action4 = st.columns([1, 1, 1, 3])
+# Search from the already-filtered data so the dashboard filters
+# continue to control what can be selected.
+action_pool = filtered.copy()
 
-    with action1:
-        if st.button("✏️ Edit", use_container_width=True):
-            show_edit_dialog(selected_row)
+if action_search.strip():
+    q = action_search.strip().lower()
 
-    with action2:
-        if st.button("🗑️ Delete", use_container_width=True):
-            show_delete_dialog(selected_row)
+    unit_match = (
+        action_pool["Unit Code"]
+        .fillna("")
+        .astype(str)
+        .str.lower()
+        .str.contains(q, regex=False)
+    )
 
-    with action3:
-        if st.button("➕ Add", use_container_width=True):
-            show_add_dialog()
+    client_match = (
+        action_pool["Name of client"]
+        .fillna("")
+        .astype(str)
+        .str.lower()
+        .str.contains(q, regex=False)
+    )
 
-    with action4:
-        export_bytes = make_excel_download(filtered.copy())
-        st.download_button(
-            "📥 Export filtered data",
-            data=export_bytes,
-            file_name="Gardenia_Town_Filtered.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            use_container_width=True,
+    action_pool = action_pool[unit_match | client_match]
+
+with selected_col:
+    if len(action_pool) > 0:
+
+        def format_action_unit(idx):
+            row = df.loc[idx]
+            return (
+                f"{row['Unit Code']} | "
+                f"{row['Phase']} | "
+                f"{row['Building']} | "
+                f"{row['STATUS']}"
+            )
+
+        selected_row = st.selectbox(
+            "Unit",
+            action_pool.index.tolist(),
+            format_func=format_action_unit,
+            key="action_selected_unit",
+            label_visibility="collapsed",
         )
+    else:
+        selected_row = None
+        st.caption("No matching unit")
 
-else:
-    st.info("No units match the current filters.")
+with edit_col:
+    if st.button(
+        "✏️",
+        key="quick_edit",
+        disabled=selected_row is None,
+        use_container_width=True,
+        help="Edit selected unit",
+    ):
+        show_edit_dialog(selected_row)
 
-    if st.button("➕ Add new unit", use_container_width=True):
+with delete_col:
+    if st.button(
+        "🗑️",
+        key="quick_delete",
+        disabled=selected_row is None,
+        use_container_width=True,
+        help="Delete selected unit",
+    ):
+        show_delete_dialog(selected_row)
+
+with add_col:
+    if st.button(
+        "➕",
+        key="quick_add",
+        use_container_width=True,
+        help="Add new unit",
+    ):
         show_add_dialog()
+
+with export_col:
+    export_bytes = make_excel_download(filtered.copy())
+
+    st.download_button(
+        "📥 Export",
+        data=export_bytes,
+        file_name="Gardenia_Town_Filtered.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        use_container_width=True,
+        help="Export the currently filtered data",
+    )
