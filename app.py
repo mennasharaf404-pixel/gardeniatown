@@ -364,3 +364,230 @@ st.dataframe(
     hide_index=True,
     height=430,
 )
+
+# ============================================================
+# DATA MANAGEMENT - ADD / EDIT / DELETE / EXPORT
+# ============================================================
+st.divider()
+st.markdown('<div class="section-title">Data Management</div>', unsafe_allow_html=True)
+st.caption("Add, edit, or delete Gardenia Town records. Changes are saved to the Excel file.")
+
+from io import BytesIO
+from openpyxl import load_workbook
+
+if "editable_df" not in st.session_state:
+    st.session_state.editable_df = df.copy()
+
+editable_df = st.session_state.editable_df
+
+def save_to_excel(dataframe):
+    if not DATA_FILE.exists():
+        raise FileNotFoundError(f"Excel file not found: {DATA_FILE}")
+
+    wb = load_workbook(DATA_FILE)
+
+    if SHEET in wb.sheetnames:
+        wb.remove(wb[SHEET])
+
+    ws = wb.create_sheet(SHEET)
+
+    # Keep the original header position: Excel row 5.
+    for _ in range(4):
+        ws.append([])
+
+    for col_num, col_name in enumerate(dataframe.columns, start=1):
+        ws.cell(row=5, column=col_num, value=str(col_name))
+
+    for row_num, row in enumerate(dataframe.itertuples(index=False, name=None), start=6):
+        for col_num, value in enumerate(row, start=1):
+            if pd.isna(value):
+                value = None
+            elif isinstance(value, np.generic):
+                value = value.item()
+            ws.cell(row=row_num, column=col_num, value=value)
+
+    wb.save(DATA_FILE)
+    load_data.clear()
+
+# -----------------------------
+# Add new unit
+# -----------------------------
+with st.expander("➕ Add New Unit", expanded=False):
+    add_cols = st.columns(4)
+
+    with add_cols[0]:
+        add_phase = st.selectbox("Phase", ["ALBA", "ORCHID"], key="add_phase")
+        add_unit_code = st.text_input("Unit Code", key="add_unit_code")
+        add_unit_type = st.text_input("Unit Type", key="add_unit_type")
+
+    with add_cols[1]:
+        add_building = st.text_input("Building", key="add_building")
+        add_floor = st.number_input("Floor", value=0, step=1, key="add_floor")
+        add_apartment = st.text_input("Apartment NO.", key="add_apartment")
+
+    with add_cols[2]:
+        add_type = st.text_input("Type", key="add_type")
+        add_area = st.number_input("In/Area", min_value=0.0, value=0.0, step=1.0, key="add_area")
+        add_new_price = st.number_input("NEW M.PRICE", min_value=0.0, value=0.0, step=1.0, key="add_new_price")
+
+    with add_cols[3]:
+        add_status = st.selectbox(
+            "STATUS", ["SOLD", "Available", "Hold", "Reserved"], key="add_status"
+        )
+        add_rooms = st.number_input("Rooms Num", min_value=0, value=0, step=1, key="add_rooms")
+        add_client = st.text_input("Name of client", key="add_client")
+
+    if st.button("Add Unit", type="primary", use_container_width=True):
+        if not add_unit_code.strip():
+            st.warning("Please enter a Unit Code.")
+        else:
+            new_row = {col: pd.NA for col in editable_df.columns}
+
+            values = {
+                "Phase": add_phase,
+                "Unit Code": add_unit_code.strip(),
+                "Unit Type": add_unit_type.strip(),
+                "Building": add_building.strip(),
+                "Floor": add_floor,
+                "Apartment NO.": add_apartment.strip(),
+                "Type": add_type.strip(),
+                "In/Area": add_area,
+                "NEW M.PRICE": add_new_price,
+                "STATUS": add_status,
+                "Rooms Num": add_rooms,
+                "Name of client": add_client.strip(),
+            }
+
+            for col, value in values.items():
+                if col in new_row:
+                    new_row[col] = value
+
+            updated = pd.concat(
+                [editable_df, pd.DataFrame([new_row])],
+                ignore_index=True
+            )
+
+            try:
+                save_to_excel(updated)
+                st.session_state.editable_df = updated
+                st.success("Unit added and saved to Excel.")
+                st.rerun()
+            except Exception as e:
+                st.error(f"Could not save the new unit: {e}")
+
+# -----------------------------
+# Edit existing units
+# -----------------------------
+with st.expander("✏️ Edit Units", expanded=False):
+    st.caption("Edit cells directly, then click Save Changes.")
+
+    edited_df = st.data_editor(
+        st.session_state.editable_df.copy(),
+        use_container_width=True,
+        height=500,
+        num_rows="fixed",
+        hide_index=False,
+        key="unit_editor",
+    )
+
+    if st.button("💾 Save Changes", type="primary", use_container_width=True):
+        try:
+            for col in ["In/Area", "NEW M.PRICE", "M.PRICE", "Total Unit", "Rooms Num", "Floor"]:
+                if col in edited_df.columns:
+                    edited_df[col] = pd.to_numeric(edited_df[col], errors="coerce")
+
+            for col in [
+                "Phase", "Unit Code", "Unit Type", "Building", "Floor",
+                "Apartment NO.", "Type", "STATUS", "Rooms Num", "Name of client"
+            ]:
+                if col in edited_df.columns:
+                    edited_df[col] = edited_df[col].astype("string").str.strip()
+
+            if "Phase" in edited_df.columns:
+                edited_df["Phase"] = edited_df["Phase"].str.upper()
+
+            save_to_excel(edited_df)
+            st.session_state.editable_df = edited_df.copy()
+            st.success("Changes saved successfully to Excel.")
+            st.rerun()
+        except Exception as e:
+            st.error(f"Could not save changes: {e}")
+
+# -----------------------------
+# Delete units
+# -----------------------------
+with st.expander("🗑️ Delete Units", expanded=False):
+    st.caption("Select one or more Row IDs, then delete them.")
+
+    delete_view = st.session_state.editable_df.reset_index().rename(
+        columns={"index": "Row ID"}
+    )
+
+    delete_cols = [
+        c for c in [
+            "Row ID", "Phase", "Unit Code", "Unit Type",
+            "Building", "Apartment NO.", "STATUS", "Name of client"
+        ] if c in delete_view.columns
+    ]
+
+    st.dataframe(
+        delete_view[delete_cols],
+        use_container_width=True,
+        hide_index=True,
+        height=300
+    )
+
+    delete_ids = st.multiselect(
+        "Select Row ID(s) to delete",
+        options=delete_view["Row ID"].tolist(),
+        format_func=lambda x: (
+            f"{x} — {delete_view.loc[delete_view['Row ID'] == x, 'Unit Code'].iloc[0]}"
+            if "Unit Code" in delete_view.columns else str(x)
+        ),
+        key="delete_ids"
+    )
+
+    if st.button("Delete Selected Units", type="secondary", use_container_width=True):
+        if not delete_ids:
+            st.warning("Please select at least one row.")
+        else:
+            try:
+                updated = (
+                    st.session_state.editable_df
+                    .drop(index=delete_ids)
+                    .reset_index(drop=True)
+                )
+                save_to_excel(updated)
+                st.session_state.editable_df = updated
+                st.success(f"{len(delete_ids)} unit(s) deleted and saved to Excel.")
+                st.rerun()
+            except Exception as e:
+                st.error(f"Could not delete the selected units: {e}")
+
+# -----------------------------
+# Export
+# -----------------------------
+with st.expander("📥 Export Data", expanded=False):
+    export_cols = [
+        c for c in [
+            "Phase", "Unit Code", "Unit Type", "Building", "Floor",
+            "Apartment NO.", "Type", "In/Area", "NEW M.PRICE",
+            "STATUS", "Rooms Num", "Name of client"
+        ] if c in filtered.columns
+    ]
+
+    export_df = filtered[export_cols].copy()
+
+    export_buffer = BytesIO()
+    with pd.ExcelWriter(export_buffer, engine="openpyxl") as writer:
+        export_df.to_excel(writer, index=False, sheet_name="Gardenia Town")
+
+    export_buffer.seek(0)
+
+    st.download_button(
+        "Download Filtered Data as Excel",
+        data=export_buffer,
+        file_name="Gardenia_Town_Export.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        use_container_width=True
+    )
